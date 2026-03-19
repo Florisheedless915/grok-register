@@ -1117,9 +1117,11 @@ def push_sso_to_api(new_tokens: list):
                 tokens_to_push = deduped
                 print(f"[*] 查询到线上 {len(existing_tokens)} 个 token，合并本次 {len(new_tokens)} 个，共 {len(deduped)} 个")
             else:
-                print(f"[Warn] 查询线上 token 失败: HTTP {get_resp.status_code}，仅推送本次 token")
+                print(f"[Error] 查询线上 token 失败: HTTP {get_resp.status_code}，放弃推送以保护存量数据")
+                return
         except Exception as e:
-            print(f"[Warn] 查询线上 token 异常: {e}，仅推送本次 token")
+            print(f"[Error] 查询线上 token 异常: {e}，放弃推送以保护存量数据")
+            return
 
     try:
         resp = requests.post(
