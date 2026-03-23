@@ -1,0 +1,30 @@
+services:
+  console:
+    image: python:3.12-slim
+    working_dir: /workspace/apps/console
+    command: >
+      bash -lc "
+      python -m venv /workspace/apps/console/.venv &&
+      /workspace/apps/console/.venv/bin/pip install -r /workspace/apps/console/requirements.txt &&
+      GROK_REGISTER_SOURCE_DIR=/workspace
+      GROK_REGISTER_PYTHON=/workspace/.venv/bin/python
+      GROK_REGISTER_CONSOLE_HOST=0.0.0.0
+      GROK_REGISTER_CONSOLE_PORT=18600
+      /workspace/apps/console/.venv/bin/python /workspace/apps/console/app.py
+      "
+    ports:
+      - "18600:18600"
+    volumes:
+      - ..:/workspace
+    restart: unless-stopped
+
+  worker-runtime:
+    build:
+      context: ..
+      dockerfile: apps/worker-runtime/Dockerfile
+    command: bash
+    working_dir: /workspace
+    volumes:
+      - ..:/workspace
+    profiles:
+      - tools

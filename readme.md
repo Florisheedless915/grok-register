@@ -1,150 +1,107 @@
-# Grok 账号批量注册工具
+# Grok Register
 
-基于 [DrissionPage](https://github.com/g1879/DrissionPage) 的 Grok (x.ai) 账号自动注册脚本，使用 [DuckMail](https://duckmail.sbs) 临时邮箱接收验证码，通过 Chrome 扩展修复 CDP `MouseEvent.screenX/screenY` 缺陷绕过 Cloudflare Turnstile。
+面向 `x.ai` 注册批处理的一体化项目。
 
-注册完成后自动推送 SSO token 到 [grok2api](https://github.com/chenyme/grok2api) 号池。
+这个仓库现在不是单一脚本仓库，而是一个“统一项目、内部解耦”的闭环方案，包含：
 
-## 特性
+- `network`：WARP / 代理桥接
+- `register`：注册执行器
+- `sink`：把成功结果推到 `grok2api` 等下游
+- `console`：任务创建、状态监控、日志查看
+- `worker-runtime`：`Xvfb + Chrome/Chromium + Python` 运行环境定义
 
-- DuckMail 临时邮箱（`curl_cffi` TLS 指纹伪装）
-- Cloudflare Turnstile 自动绕过（Chrome 扩展 patch `MouseEvent.screenX/screenY`）
-- 无头服务器支持（Xvfb 虚拟显示器，自动检测 Linux 环境）
-- 中英文界面自动适配
-- 自动推送 SSO token 到 grok2api（支持 append 合并模式）
+## 你能直接用它做什么
 
----
+- 命令行直接跑注册
+- 在 Web 控制台里创建批量任务
+- 给每个任务独立配置出口、邮箱参数和 sink
+- 实时查看每个任务的轮次、成功数、失败数和日志
+- 注册成功后自动把 `sso` 推入 `grok2api` 兼容接口
 
-## 环境要求
+## 项目结构
 
-- Python 3.10+
-- Chromium 或 Chrome 浏览器
-- [DuckMail](https://duckmail.sbs) 账号（用于创建临时邮箱）
-- 可选：[grok2api](https://github.com/chenyme/grok2api) 实例（用于自动导入 SSO token）
+- [apps/console](/home/codex/grok-register/apps/console)：控制台
+- [apps/network-gateway](/home/codex/grok-register/apps/network-gateway)：前置网络出口约定
+- [apps/register-runner](/home/codex/grok-register/apps/register-runner)：执行器模块说明
+- [apps/token-sink](/home/codex/grok-register/apps/token-sink)：结果落池说明
+- [apps/worker-runtime](/home/codex/grok-register/apps/worker-runtime)：运行时环境定义
+- [deploy](/home/codex/grok-register/deploy)：启动脚本和部署骨架
+- [docs](/home/codex/grok-register/docs)：架构、流程、快速开始、配置说明
+- [DrissionPage_example.py](/home/codex/grok-register/DrissionPage_example.py)：当前主执行脚本
+- [email_register.py](/home/codex/grok-register/email_register.py)：临时邮箱适配层
 
----
+## 快速入口
 
-## 安装
+- 新手先看 [docs/quickstart.md](/home/codex/grok-register/docs/quickstart.md)
+- 想看完整链路看 [docs/business-flow.md](/home/codex/grok-register/docs/business-flow.md)
+- 想弄清楚字段含义看 [docs/options.md](/home/codex/grok-register/docs/options.md)
+- 想看模块边界看 [docs/architecture.md](/home/codex/grok-register/docs/architecture.md)
 
-```bash
-pip install -r requirements.txt
-```
-
-无头服务器（Linux）额外安装：
-
-```bash
-apt install -y xvfb
-pip install PyVirtualDisplay
-# 推荐用 playwright 装 chromium（避免 snap 版 AppArmor 限制）
-pip install playwright && python -m playwright install chromium && python -m playwright install-deps chromium
-```
-
----
-
-## 配置文件（config.json）
+## 命令行运行
 
 ```bash
+cd /home/codex/grok-register
 cp config.example.json config.json
+python3 -m venv .venv
+. .venv/bin/activate
+pip install -r requirements.txt
+python DrissionPage_example.py --count 1
 ```
 
-编辑 `config.json`：
+## 控制台运行
+
+```bash
+cd /home/codex/grok-register
+./deploy/start-console.sh
+```
+
+默认监听 `0.0.0.0:18600`。
+
+## 当前配置模板
 
 ```json
 {
-    "run": { "count": 10 },
-    "duckmail_api_base": "https://api.duckmail.sbs",
-    "duckmail_bearer": "<your_duckmail_bearer_token>",
-    "proxy": "",
-    "browser_proxy": "",
-    "api": {
-        "endpoint": "",
-        "token": "",
-        "append": true
-    }
+  "run": {
+    "count": 50
+  },
+  "temp_mail_api_base": "https://mail-api.example.com",
+  "temp_mail_admin_password": "<your_admin_password>",
+  "temp_mail_domain": "mail.example.com",
+  "temp_mail_site_password": "",
+  "proxy": "",
+  "browser_proxy": "",
+  "api": {
+    "endpoint": "http://127.0.0.1:18000/api/v1/admin/tokens",
+    "token": "",
+    "append": true
+  }
 }
 ```
 
-### 字段说明
+说明：
 
-| 字段 | 类型 | 说明 |
-|------|------|------|
-| `run.count` | int | 注册轮数，`0` 为无限循环，可通过 `--count` 覆盖 |
-| `duckmail_api_base` | string | DuckMail API 地址，默认 `https://api.duckmail.sbs` |
-| `duckmail_bearer` | string | DuckMail Bearer Token（[获取方式](#获取-duckmail-bearer-token)） |
-| `proxy` | string | DuckMail API 请求代理（可选） |
-| `browser_proxy` | string | 浏览器代理，无头服务器需翻墙时填写（可选） |
-| `api.endpoint` | string | grok2api 管理接口地址，留空跳过推送 |
-| `api.token` | string | grok2api 的 `app_key` |
-| `api.append` | bool | `true` 合并线上已有 token，`false` 覆盖 |
+- 仓库里的模板已经去掉个人邮箱和个人域名
+- `config.json` 仍然不入库，避免把生产凭据提交到仓库
+- 代码仍兼容旧的 `duckmail_*` 字段，但新部署建议统一使用 `temp_mail_*`
 
----
+## 闭环要求
 
-## 获取 DuckMail Bearer Token
+只有下面 4 段都通，业务才算真正能跑批：
 
-1. 打开 [duckmail.sbs](https://duckmail.sbs) 并注册登录
-2. 打开浏览器开发者工具 (F12) → Network
-3. 刷新页面，找到任意发往 `api.duckmail.sbs` 的请求
-4. 复制请求头中 `Authorization: Bearer <token>` 里的 token
-5. 填入 `config.json` 的 `duckmail_bearer` 字段
+1. 网络出口通：`browser_proxy` / `proxy`
+2. 临时邮箱通：`temp_mail_api_base` / `temp_mail_domain`
+3. 注册执行通：浏览器、`Xvfb`、Python 依赖齐全
+4. sink 通：`api.endpoint` / `api.token`
 
----
+## 兼容性说明
 
-## 启动方式
-
-```bash
-# 按 config.json 中 run.count 执行（默认 10 轮）
-python DrissionPage_example.py
-
-# 指定轮数
-python DrissionPage_example.py --count 50
-
-# 无限循环
-python DrissionPage_example.py --count 0
-```
-
-无头服务器会自动启用 Xvfb，无需额外配置。
-
----
-
-## 输出文件
-
-```
-sso/
-  sso_<timestamp>.txt     ← 每行一个 SSO token
-logs/
-  run_<timestamp>.log     ← 每轮注册的邮箱、密码和结果
-```
-
-目录在首次运行时自动创建。
-
----
-
-## 文件结构
-
-```
-├── DrissionPage_example.py     # 主脚本
-├── email_register.py           # DuckMail 临时邮箱封装
-├── config.json                 # 配置文件（不入库）
-├── config.example.json         # 配置模板
-├── requirements.txt            # Python 依赖
-├── turnstilePatch/             # Chrome 扩展（Turnstile patch）
-│   ├── manifest.json
-│   └── script.js
-├── sso/                        # SSO token 输出（自动创建）
-└── logs/                       # 运行日志（自动创建）
-```
-
----
-
-## 无头服务器部署注意
-
-- snap 版 chromium 在 root 下有 AppArmor 限制，推荐用 playwright 安装的 chromium
-- 服务器直连 x.ai 可能被墙，需在 `browser_proxy` 填写代理地址
-- 脚本自动检测 Linux 环境并启用 Xvfb + playwright chromium 路径
-
----
+- 根目录命令行脚本继续保留，可直接使用
+- 新增控制台和模块目录不会接管你现有生产目录
+- 控制台任务全部运行在 `apps/console/runtime/tasks/` 下的独立目录里
 
 ## 致谢
 
-- [kevinr229/grok-maintainer](https://github.com/kevinr229/grok-maintainer) — 原始项目
-- [grok2api](https://github.com/chenyme/grok2api) — Grok API 代理
-- [DuckMail](https://duckmail.sbs) — 临时邮箱服务
+- 感谢 [XeanYu](https://github.com/XeanYu) 和 [chenyme](https://github.com/chenyme) 的开源项目与思路，这个仓库是在他们相关工作的基础上继续整理、集成和工程化。
+- [kevinr229/grok-maintainer](https://github.com/kevinr229/grok-maintainer)
+- [DrissionPage](https://github.com/g1879/DrissionPage)
+- [grok2api](https://github.com/chenyme/grok2api)

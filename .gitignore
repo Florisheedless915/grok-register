@@ -3,6 +3,8 @@ __pycache__/
 logs/
 sso/
 chrome_data/
+apps/console/runtime/
+apps/console/.venv/
 config.json
 node_modules/
 .idea/

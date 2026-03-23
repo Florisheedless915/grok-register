@@ -1,13 +1,15 @@
 {
     "run": {
-        "count": 10
+        "count": 50
     },
-    "duckmail_api_base": "https://api.duckmail.sbs",
-    "duckmail_bearer": "<your_duckmail_bearer_token>",
+    "temp_mail_api_base": "https://mail-api.example.com",
+    "temp_mail_admin_password": "<your_admin_password>",
+    "temp_mail_domain": "mail.example.com",
+    "temp_mail_site_password": "",
     "proxy": "",
     "browser_proxy": "",
     "api": {
-        "endpoint": "",
+        "endpoint": "http://127.0.0.1:18000/api/v1/admin/tokens",
         "token": "",
         "append": true
     }

@@ -1,0 +1,19 @@
+[Unit]
+Description=Grok Register Console
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+WorkingDirectory=/opt/grok-register/apps/console
+Environment=GROK_REGISTER_SOURCE_DIR=/opt/grok-register
+Environment=GROK_REGISTER_PYTHON=/opt/grok-register/.venv/bin/python
+Environment=GROK_REGISTER_CONSOLE_HOST=0.0.0.0
+Environment=GROK_REGISTER_CONSOLE_PORT=18600
+Environment=GROK_REGISTER_CONSOLE_MAX_CONCURRENT_TASKS=1
+ExecStart=/opt/grok-register/apps/console/.venv/bin/python /opt/grok-register/apps/console/app.py
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target

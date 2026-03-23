@@ -1,0 +1,217 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Grok Register Console</title>
+  <link rel="stylesheet" href="/static/app.css">
+</head>
+<body>
+  <div id="app" class="shell">
+    <header class="topbar">
+      <div class="brand">
+        <div class="brand-kicker">Unified Console</div>
+        <h1>Grok Register</h1>
+        <p>统一编排控制台。任务运行在独立工作目录里，不直接改动现有生产任务。</p>
+      </div>
+      <div class="topbar-meta">
+        <div class="meta-card">
+          <div class="meta-label">Source</div>
+          <div class="meta-value">{{ source_project }}</div>
+        </div>
+        <div class="meta-card">
+          <div class="meta-label">并发上限</div>
+          <div class="meta-value">{{ max_concurrent_tasks }}</div>
+        </div>
+      </div>
+    </header>
+
+    <main class="main">
+      <section class="panel panel-settings">
+        <div class="panel-head">
+          <div>
+            <div class="eyebrow">System Settings</div>
+            <h2>系统默认配置</h2>
+            <p class="panel-desc">这里保存全局默认值。新建任务时如果不展开高级设置，就直接使用这里的配置。</p>
+          </div>
+          <button id="toggleSettingsBtn" class="button button-secondary" type="button">展开系统默认配置</button>
+        </div>
+
+        <form id="settingsForm" class="task-form hidden">
+          <label>
+            <span>浏览器代理</span>
+            <small>浏览器访问 x.ai 时走的代理，通常填本机 WARP 桥接地址。</small>
+            <input name="browser_proxy" placeholder="例如 http://127.0.0.1:18118">
+          </label>
+          <label>
+            <span>请求代理</span>
+            <small>邮箱 API 这类普通 HTTP 请求走的代理，不填就直连。</small>
+            <input name="proxy" placeholder="例如 http://host:port">
+          </label>
+          <label>
+            <span>邮箱 API Base</span>
+            <small>临时邮箱服务接口地址，例如你自己的邮箱 API。</small>
+            <input name="temp_mail_api_base" placeholder="https://api.example.com">
+          </label>
+          <label>
+            <span>邮箱域名</span>
+            <small>注册时实际使用的邮箱后缀。</small>
+            <input name="temp_mail_domain" placeholder="example.com">
+          </label>
+          <label>
+            <span>邮箱管理密码</span>
+            <small>创建临时邮箱地址用的管理口令。</small>
+            <input name="temp_mail_admin_password" placeholder="admin password">
+          </label>
+          <label>
+            <span>站点密码</span>
+            <small>如果你的邮箱 API 还要求额外站点鉴权，就填这里。</small>
+            <input name="temp_mail_site_password" placeholder="optional">
+          </label>
+          <label>
+            <span>Token 上传接口</span>
+            <small>注册成功后，SSO token 推送到哪个接口。</small>
+            <input name="api_endpoint" placeholder="http://127.0.0.1:18000/api/v1/admin/tokens">
+          </label>
+          <label>
+            <span>API Token</span>
+            <small>推送 token 到下游接口时使用的管理口令。</small>
+            <input name="api_token" placeholder="bearer token">
+          </label>
+          <label class="checkbox-row">
+            <input name="api_append" type="checkbox" checked>
+            <span>追加写入 token</span>
+          </label>
+          <div class="form-actions full">
+            <button class="button" type="submit">保存默认配置</button>
+            <div id="settingsMessage" class="form-message"></div>
+          </div>
+        </form>
+      </section>
+
+      <section class="panel panel-form">
+        <div class="panel-head">
+          <div>
+            <div class="eyebrow">Create Task</div>
+            <h2>新建任务</h2>
+            <p class="panel-desc">最简模式只填任务名称和执行次数。需要临时覆盖默认配置时，再展开高级设置。</p>
+          </div>
+          <button id="refreshBtn" class="button button-secondary" type="button">刷新</button>
+        </div>
+
+        <form id="taskForm" class="task-form">
+          <label>
+            <span>任务名称</span>
+            <small>给这批注册任务起个便于识别的名字。</small>
+            <input name="name" required placeholder="例如 hk-warp-batch-01">
+          </label>
+          <label>
+            <span>执行次数</span>
+            <small>这一批最多尝试多少轮注册。</small>
+            <input name="count" type="number" min="1" max="5000" required>
+          </label>
+          <div class="full advanced-toggle-row">
+            <button id="toggleAdvancedBtn" class="button button-secondary" type="button">高级设置</button>
+          </div>
+          <div id="advancedFields" class="advanced-fields full hidden">
+            <label>
+              <span>浏览器代理覆盖</span>
+              <small>只覆盖当前任务，留空则继续用系统默认值。</small>
+              <input name="browser_proxy" placeholder="留空则用系统默认">
+            </label>
+            <label>
+              <span>请求代理覆盖</span>
+              <small>只影响当前任务里的普通 HTTP 请求。</small>
+              <input name="proxy" placeholder="留空则用系统默认">
+            </label>
+            <label>
+              <span>邮箱 API Base 覆盖</span>
+              <small>当前任务临时改用别的邮箱接口时再填。</small>
+              <input name="temp_mail_api_base" placeholder="留空则用系统默认">
+            </label>
+            <label>
+              <span>邮箱域名覆盖</span>
+              <small>当前任务临时改邮箱后缀时再填。</small>
+              <input name="temp_mail_domain" placeholder="留空则用系统默认">
+            </label>
+            <label>
+              <span>邮箱管理密码覆盖</span>
+              <small>当前任务临时改邮箱创建口令时再填。</small>
+              <input name="temp_mail_admin_password" placeholder="留空则用系统默认">
+            </label>
+            <label>
+              <span>站点密码覆盖</span>
+              <small>只有这个任务要额外站点鉴权时再填。</small>
+              <input name="temp_mail_site_password" placeholder="留空则用系统默认">
+            </label>
+            <label>
+              <span>Token 上传接口覆盖</span>
+              <small>当前任务把 token 推到另一套服务时再填。</small>
+              <input name="api_endpoint" placeholder="留空则用系统默认">
+            </label>
+            <label>
+              <span>API Token 覆盖</span>
+              <small>当前任务临时改管理口令时再填。</small>
+              <input name="api_token" placeholder="留空则用系统默认">
+            </label>
+            <label class="checkbox-row">
+              <input name="api_append" type="checkbox">
+              <span>勾选时覆盖为追加写入</span>
+            </label>
+          </div>
+          <div class="form-actions full">
+            <button class="button" type="submit">创建任务</button>
+            <div id="formMessage" class="form-message"></div>
+          </div>
+        </form>
+      </section>
+
+      <section class="workspace">
+        <section class="panel panel-tasks">
+          <div class="panel-head">
+            <div>
+              <div class="eyebrow">Tasks</div>
+              <h2>任务栏</h2>
+              <p class="panel-desc">点击任务卡切换查看实时日志。删除只会删控制台里的记录和任务目录，不影响别的任务。</p>
+            </div>
+          </div>
+          <div id="taskList" class="task-list"></div>
+        </section>
+
+        <section class="panel panel-detail">
+          <div class="panel-head">
+            <div>
+              <div class="eyebrow">Live Detail</div>
+              <h2 id="detailTitle">实时控制台</h2>
+            </div>
+            <button id="stopBtn" class="button button-danger" type="button" disabled>停止任务</button>
+          </div>
+
+          <div id="detailSummary" class="summary-grid"></div>
+          <div class="console-wrap">
+            <div class="console-head">实时控制台日志</div>
+            <pre id="consoleOutput" class="console-output">选择任务后显示输出</pre>
+          </div>
+        </section>
+      </section>
+
+      <section class="panel panel-mail">
+        <div class="panel-head">
+          <div>
+            <div class="eyebrow">Temp Mail</div>
+            <h2>临时邮箱参数</h2>
+            <p class="panel-desc">这里只展示当前任务实际生效的邮箱与上传配置，默认折叠。</p>
+          </div>
+          <button id="toggleMailBtn" class="button button-secondary" type="button">展开临时邮箱参数</button>
+        </div>
+        <div id="detailMeta" class="detail-grid hidden"></div>
+      </section>
+    </main>
+  </div>
+
+  <script>
+    window.__DEFAULTS__ = {{ defaults|safe }};
+  </script>
+  <script src="/static/app.js"></script>
+</body>
+</html>

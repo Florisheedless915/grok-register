@@ -2,11 +2,13 @@
 from __future__ import annotations
 
 import json
-import logging
 import random
 import re
 import string
 import time
+from email import policy
+from email.parser import BytesParser
+from html import unescape
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
@@ -20,7 +22,7 @@ from requests.adapters import HTTPAdapter
 from urllib3.util.retry import Retry
 
 # ============================================================
-# DuckMail 配置（从 config.json 加载）
+# Cloudflare Temp Email 配置（从 config.json 加载）
 # ============================================================
 
 _config_path = Path(__file__).parent / "config.json"
@@ -29,8 +31,18 @@ if _config_path.exists():
     with _config_path.open("r", encoding="utf-8") as _f:
         _conf = json.load(_f)
 
-DUCKMAIL_API_BASE = str(_conf.get("duckmail_api_base", "https://api.duckmail.sbs"))
-DUCKMAIL_BEARER = str(_conf.get("duckmail_bearer", ""))
+TEMP_MAIL_API_BASE = str(
+    _conf.get("temp_mail_api_base")
+    or _conf.get("duckmail_api_base")
+    or ""
+)
+TEMP_MAIL_ADMIN_PASSWORD = str(
+    _conf.get("temp_mail_admin_password")
+    or _conf.get("duckmail_bearer")
+    or ""
+)
+TEMP_MAIL_DOMAIN = str(_conf.get("temp_mail_domain", ""))
+TEMP_MAIL_SITE_PASSWORD = str(_conf.get("temp_mail_site_password", ""))
 PROXY = str(_conf.get("proxy", ""))
 
 # ============================================================
@@ -42,7 +54,7 @@ _temp_email_cache: Dict[str, str] = {}
 
 def get_email_and_token() -> Tuple[Optional[str], Optional[str]]:
     """
-    创建 DuckMail 临时邮箱并返回 (email, mail_token)。
+    创建临时邮箱并返回 (email, mail_token)。
     供 DrissionPage_example.py 调用。
     """
     email, _password, mail_token = create_temp_email()
@@ -54,7 +66,7 @@ def get_email_and_token() -> Tuple[Optional[str], Optional[str]]:
 
 def get_oai_code(dev_token: str, email: str, timeout: int = 30) -> Optional[str]:
     """
-    轮询 DuckMail 获取 OTP 验证码。
+    轮询收件箱获取 OTP 验证码。
     供 DrissionPage_example.py 调用。
 
     Returns:
@@ -67,11 +79,11 @@ def get_oai_code(dev_token: str, email: str, timeout: int = 30) -> Optional[str]
 
 
 # ============================================================
-# DuckMail 核心函数
+# Cloudflare Temp Email 核心函数
 # ============================================================
 
-def _create_duckmail_session():
-    """创建 DuckMail 请求会话（优先 curl_cffi 绕 TLS 指纹）"""
+def _create_session():
+    """创建请求会话（优先 curl_cffi）。"""
     if curl_requests:
         session = curl_requests.Session()
         session.headers.update({
@@ -83,9 +95,6 @@ def _create_duckmail_session():
             session.proxies = {"http": PROXY, "https": PROXY}
         return session, True
 
-    # fallback to requests
-    import urllib3
-    urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
     s = requests.Session()
     retry = Retry(total=3, backoff_factor=1, status_forcelist=[429, 500, 502, 503, 504])
     adapter = HTTPAdapter(max_retries=retry)
@@ -102,105 +111,119 @@ def _create_duckmail_session():
 
 
 def _do_request(session, use_cffi, method, url, **kwargs):
-    """统一请求，curl_cffi 加 impersonate 参数"""
+    """统一请求，curl_cffi 自动附带 impersonate。"""
     if use_cffi:
         kwargs.setdefault("impersonate", "chrome131")
     return getattr(session, method)(url, **kwargs)
 
 
-def _generate_password(length=14):
-    lower = string.ascii_lowercase
-    upper = string.ascii_uppercase
-    digits = string.digits
-    special = "!@#$%"
-    pwd = [random.choice(lower), random.choice(upper),
-           random.choice(digits), random.choice(special)]
-    all_chars = lower + upper + digits + special
-    pwd += [random.choice(all_chars) for _ in range(length - 4)]
-    random.shuffle(pwd)
-    return "".join(pwd)
+def _build_headers(extra: Optional[Dict[str, str]] = None) -> Dict[str, str]:
+    headers: Dict[str, str] = {}
+    if TEMP_MAIL_SITE_PASSWORD:
+        headers["x-custom-auth"] = TEMP_MAIL_SITE_PASSWORD
+    if extra:
+        headers.update(extra)
+    return headers
+
+
+def _generate_local_part(length: int = 10) -> str:
+    chars = string.ascii_lowercase + string.digits
+    return "".join(random.choice(chars) for _ in range(length))
 
 
 def create_temp_email() -> Tuple[str, str, str]:
-    """创建 DuckMail 临时邮箱，返回 (email, password, mail_token)"""
-    if not DUCKMAIL_BEARER:
-        raise Exception("duckmail_bearer 未设置，无法创建临时邮箱")
+    """创建 Cloudflare Temp Email 地址，返回 (email, password, mail_token)。"""
+    if not TEMP_MAIL_API_BASE:
+        raise Exception("temp_mail_api_base 未设置，无法创建临时邮箱")
+    if not TEMP_MAIL_ADMIN_PASSWORD:
+        raise Exception("temp_mail_admin_password 未设置，无法创建临时邮箱")
+    if not TEMP_MAIL_DOMAIN:
+        raise Exception("temp_mail_domain 未设置，无法创建临时邮箱")
 
-    chars = string.ascii_lowercase + string.digits
-    length = random.randint(8, 13)
-    email_local = "".join(random.choice(chars) for _ in range(length))
-    email = f"{email_local}@duckmail.sbs"
-    password = _generate_password()
-
-    api_base = DUCKMAIL_API_BASE.rstrip("/")
-    bearer_headers = {"Authorization": f"Bearer {DUCKMAIL_BEARER}"}
-    session, use_cffi = _create_duckmail_session()
+    api_base = TEMP_MAIL_API_BASE.rstrip("/")
+    email_local = _generate_local_part(random.randint(8, 12))
+    session, use_cffi = _create_session()
+    headers = _build_headers({"x-admin-auth": TEMP_MAIL_ADMIN_PASSWORD})
 
     try:
-        # 1. 创建账号
-        res = _do_request(session, use_cffi, "post",
-                          f"{api_base}/accounts",
-                          json={"address": email, "password": password},
-                          headers=bearer_headers, timeout=15)
-        if res.status_code not in (200, 201):
+        res = _do_request(
+            session,
+            use_cffi,
+            "post",
+            f"{api_base}/admin/new_address",
+            json={
+                "name": email_local,
+                "domain": TEMP_MAIL_DOMAIN,
+                "enablePrefix": False,
+            },
+            headers=headers,
+            timeout=20,
+        )
+        if res.status_code != 200:
             raise Exception(f"创建邮箱失败: {res.status_code} - {res.text[:200]}")
 
-        # 2. 获取 mail token
-        time.sleep(0.5)
-        token_res = _do_request(session, use_cffi, "post",
-                                f"{api_base}/token",
-                                json={"address": email, "password": password},
-                                timeout=15)
-        if token_res.status_code == 200:
-            mail_token = token_res.json().get("token")
-            if mail_token:
-                print(f"[*] DuckMail 临时邮箱创建成功: {email}")
-                return email, password, mail_token
+        data = res.json()
+        email = data.get("address") or ""
+        mail_token = data.get("jwt") or ""
+        password = data.get("password") or ""
+        if not email or not mail_token:
+            raise Exception(f"接口返回缺少 address/jwt: {data}")
 
-        raise Exception(f"获取邮件 Token 失败: {token_res.status_code}")
+        print(f"[*] Cloudflare 临时邮箱创建成功: {email}")
+        return email, password, mail_token
     except Exception as e:
-        raise Exception(f"DuckMail 创建邮箱失败: {e}")
+        raise Exception(f"Cloudflare 临时邮箱创建失败: {e}")
 
 
 def fetch_emails(mail_token: str) -> List[Dict[str, Any]]:
-    """获取 DuckMail 邮件列表"""
+    """获取邮件列表。"""
     try:
-        api_base = DUCKMAIL_API_BASE.rstrip("/")
-        headers = {"Authorization": f"Bearer {mail_token}"}
-        session, use_cffi = _create_duckmail_session()
-        res = _do_request(session, use_cffi, "get",
-                          f"{api_base}/messages",
-                          headers=headers, timeout=15)
+        api_base = TEMP_MAIL_API_BASE.rstrip("/")
+        headers = _build_headers({"Authorization": f"Bearer {mail_token}"})
+        session, use_cffi = _create_session()
+        res = _do_request(
+            session,
+            use_cffi,
+            "get",
+            f"{api_base}/api/mails",
+            params={"limit": 20, "offset": 0},
+            headers=headers,
+            timeout=20,
+        )
         if res.status_code == 200:
             data = res.json()
-            return data.get("hydra:member") or data.get("member") or data.get("data") or []
+            if isinstance(data, dict):
+                return data.get("results") or data.get("data") or []
     except Exception:
         pass
     return []
 
 
-def fetch_email_detail(mail_token: str, msg_id: str) -> Optional[Dict]:
-    """获取 DuckMail 单封邮件详情"""
+def fetch_email_detail(mail_token: str, msg_id: str) -> Optional[Dict[str, Any]]:
+    """获取单封邮件详情。"""
     try:
-        api_base = DUCKMAIL_API_BASE.rstrip("/")
-        headers = {"Authorization": f"Bearer {mail_token}"}
-        session, use_cffi = _create_duckmail_session()
-
-        if isinstance(msg_id, str) and msg_id.startswith("/messages/"):
-            msg_id = msg_id.split("/")[-1]
-
-        res = _do_request(session, use_cffi, "get",
-                          f"{api_base}/messages/{msg_id}",
-                          headers=headers, timeout=15)
+        api_base = TEMP_MAIL_API_BASE.rstrip("/")
+        headers = _build_headers({"Authorization": f"Bearer {mail_token}"})
+        session, use_cffi = _create_session()
+        res = _do_request(
+            session,
+            use_cffi,
+            "get",
+            f"{api_base}/api/mail/{msg_id}",
+            headers=headers,
+            timeout=20,
+        )
         if res.status_code == 200:
-            return res.json()
+            data = res.json()
+            if isinstance(data, dict):
+                return data
     except Exception:
         pass
     return None
 
 
 def wait_for_verification_code(mail_token: str, timeout: int = 120) -> Optional[str]:
-    """轮询 DuckMail 等待验证码邮件"""
+    """轮询临时邮箱，等待验证码邮件。"""
     start = time.time()
     seen_ids = set()
 
@@ -209,20 +232,96 @@ def wait_for_verification_code(mail_token: str, timeout: int = 120) -> Optional[
         for msg in messages:
             if not isinstance(msg, dict):
                 continue
-            msg_id = msg.get("id") or msg.get("@id")
+            msg_id = msg.get("id")
             if not msg_id or msg_id in seen_ids:
                 continue
             seen_ids.add(msg_id)
 
             detail = fetch_email_detail(mail_token, str(msg_id))
-            if detail:
-                content = detail.get("text") or detail.get("html") or ""
-                code = extract_verification_code(content)
-                if code:
-                    print(f"[*] 从 DuckMail 提取到验证码: {code}")
-                    return code
+            if not detail:
+                continue
+
+            content = _extract_mail_content(detail)
+            code = extract_verification_code(content)
+            if code:
+                print(f"[*] 从 Cloudflare 临时邮箱提取到验证码: {code}")
+                return code
         time.sleep(3)
     return None
+
+
+def _extract_mail_content(detail: Dict[str, Any]) -> str:
+    """兼容 text/html/raw MIME 三种内容来源。"""
+    direct_parts = [
+        detail.get("subject"),
+        detail.get("text"),
+        detail.get("html"),
+        detail.get("raw"),
+        detail.get("source"),
+    ]
+    direct_content = "\n".join(str(part) for part in direct_parts if part)
+    if detail.get("text") or detail.get("html"):
+        return direct_content
+
+    raw = detail.get("raw") or detail.get("source")
+    if not raw or not isinstance(raw, str):
+        return direct_content
+    return f"{direct_content}\n{_parse_raw_email(raw)}"
+
+
+def _parse_raw_email(raw: str) -> str:
+    try:
+        message = BytesParser(policy=policy.default).parsebytes(raw.encode("utf-8", errors="ignore"))
+    except Exception:
+        return raw
+
+    parts: List[str] = []
+    subject = message.get("subject")
+    if subject:
+        parts.append(f"Subject: {subject}")
+
+    if message.is_multipart():
+        for part in message.walk():
+            if part.get_content_maintype() == "multipart":
+                continue
+            disposition = (part.get_content_disposition() or "").lower()
+            if disposition == "attachment":
+                continue
+            content = _decode_email_part(part)
+            if content:
+                parts.append(content)
+    else:
+        content = _decode_email_part(message)
+        if content:
+            parts.append(content)
+    return "\n".join(parts)
+
+
+def _decode_email_part(part) -> str:
+    try:
+        content = part.get_content()
+        if isinstance(content, bytes):
+            charset = part.get_content_charset() or "utf-8"
+            content = content.decode(charset, errors="ignore")
+        if not isinstance(content, str):
+            content = str(content)
+        if "html" in (part.get_content_type() or "").lower():
+            content = _html_to_text(content)
+        return content.strip()
+    except Exception:
+        payload = part.get_payload(decode=True)
+        if isinstance(payload, bytes):
+            charset = part.get_content_charset() or "utf-8"
+            return payload.decode(charset, errors="ignore").strip()
+    return ""
+
+
+def _html_to_text(html: str) -> str:
+    text = re.sub(r"(?is)<(script|style).*?>.*?</\1>", " ", html)
+    text = re.sub(r"(?i)<br\s*/?>", "\n", text)
+    text = re.sub(r"(?i)</p>", "\n", text)
+    text = re.sub(r"(?s)<[^>]+>", " ", text)
+    return unescape(re.sub(r"[ \t\r\f\v]+", " ", text)).strip()
 
 
 def extract_verification_code(content: str) -> Optional[str]:
