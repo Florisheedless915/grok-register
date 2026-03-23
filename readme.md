@@ -122,6 +122,7 @@ python DrissionPage_example.py --count 1
 
 ## 致谢
 
+- 感谢 [ReinerBRO](https://github.com/ReinerBRO) 对仓库整理、部署验证和整合方向的推动。
 - 感谢 [XeanYu](https://github.com/XeanYu) 和 [chenyme](https://github.com/chenyme) 的开源项目与思路，这个仓库是在他们相关工作的基础上继续整理、集成和工程化。
 - [kevinr229/grok-maintainer](https://github.com/kevinr229/grok-maintainer)
 - [DrissionPage](https://github.com/g1879/DrissionPage)
